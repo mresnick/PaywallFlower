@@ -85,6 +85,33 @@ npm run dev
 
 ### Docker Deployment
 
+#### Using Pre-built Images (Recommended)
+
+The project automatically builds and publishes Docker images on every commit. You can use these pre-built images:
+
+**From GitHub Container Registry:**
+```bash
+docker pull ghcr.io/yourusername/paywallflower:latest
+docker run -d --name paywallflower --env-file .env ghcr.io/yourusername/paywallflower:latest
+```
+
+**From Docker Hub:**
+```bash
+docker pull yourusername/paywallflower:latest
+docker run -d --name paywallflower --env-file .env yourusername/paywallflower:latest
+```
+
+**With Docker Compose:**
+```yaml
+# Update docker-compose.yml to use pre-built image
+services:
+  paywallflower-bot:
+    image: ghcr.io/yourusername/paywallflower:latest
+    # ... rest of configuration
+```
+
+#### Building Locally
+
 1. Create your `.env` file from the example
 2. Build and run with Docker Compose:
 ```bash
@@ -96,6 +123,16 @@ Or build and run manually:
 docker build -t paywallflower .
 docker run -d --name paywallflower --env-file .env paywallflower
 ```
+
+#### Automated Builds
+
+The project uses GitHub Actions to automatically:
+- Build multi-platform Docker images (AMD64 and ARM64)
+- Publish to GitHub Container Registry and Docker Hub
+- Scan images for security vulnerabilities
+- Tag images based on branches and releases
+
+See [`.github/workflows/README.md`](.github/workflows/README.md) for detailed setup instructions.
 
 ## Configuration
 
