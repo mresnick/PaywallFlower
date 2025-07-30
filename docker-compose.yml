@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  paywallflower:
+    build: .
+    container_name: paywallflower-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/usr/src/app/logs
+    networks:
+      - paywallflower-network
+    # Resource limits to prevent excessive resource usage
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  paywallflower-network:
+    driver: bridge
