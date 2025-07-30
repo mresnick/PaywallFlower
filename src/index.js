@@ -83,14 +83,33 @@ class PaywallFlowerBot {
   async stop() {
     try {
       logger.info('Stopping PaywallFlower bot...');
-      await this.messageHandler.cleanup();
-      await this.client.destroy();
+      
+      // Set a timeout to force exit if graceful shutdown takes too long
+      const shutdownTimeout = setTimeout(() => {
+        logger.error('Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+      }, 10000); // 10 second timeout
+      
+      // Cleanup message handler (includes browser service cleanup)
+      if (this.messageHandler) {
+        await this.messageHandler.cleanup();
+      }
+      
+      // Destroy Discord client connection
+      if (this.client && this.client.isReady()) {
+        await this.client.destroy();
+      }
+      
+      // Clear the timeout since we completed successfully
+      clearTimeout(shutdownTimeout);
+      
       logger.info('Bot stopped successfully');
     } catch (error) {
       logger.error('Error stopping bot', {
         error: error.message,
         stack: error.stack
       });
+      throw error; // Re-throw to allow calling code to handle
     }
   }
 }
@@ -102,31 +121,79 @@ module.exports = PaywallFlowerBot;
 const bot = new PaywallFlowerBot();
 
 // Handle process termination gracefully
-process.on('SIGINT', async () => {
-  logger.info('Received SIGINT, shutting down gracefully...');
-  await bot.stop();
-  process.exit(0);
+let isShuttingDown = false;
+
+const gracefulShutdown = async (signal) => {
+  if (isShuttingDown) {
+    logger.warn(`Already shutting down, ignoring ${signal}`);
+    return;
+  }
+  
+  isShuttingDown = true;
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+  
+  try {
+    await bot.stop();
+    logger.info('Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error during graceful shutdown', {
+      error: error.message,
+      stack: error.stack
+    });
+    process.exit(1);
+  }
+};
+
+// Handle various termination signals
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGQUIT', () => gracefulShutdown('SIGQUIT'));
+
+// Handle Windows-specific signals
+process.on('SIGBREAK', () => gracefulShutdown('SIGBREAK'));
+
+// Handle process exit event
+process.on('exit', (code) => {
+  logger.info(`Process exiting with code: ${code}`);
 });
 
-process.on('SIGTERM', async () => {
-  logger.info('Received SIGTERM, shutting down gracefully...');
-  await bot.stop();
-  process.exit(0);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
+// Handle unhandled promise rejections
+process.on('unhandledRejection', async (reason, promise) => {
   logger.error('Unhandled Rejection at:', {
     promise: promise,
     reason: reason
   });
+  
+  // For critical unhandled rejections, perform graceful shutdown
+  if (reason && reason.code === 'ECONNRESET' ||
+      (reason && reason.message && reason.message.includes('WebSocket'))) {
+    logger.error('Critical error detected, initiating graceful shutdown');
+    await gracefulShutdown('unhandledRejection');
+  }
 });
 
-process.on('uncaughtException', (error) => {
+// Handle uncaught exceptions
+process.on('uncaughtException', async (error) => {
   logger.error('Uncaught Exception:', {
     error: error.message,
     stack: error.stack
   });
-  process.exit(1);
+  
+  // Attempt graceful shutdown for uncaught exceptions
+  try {
+    await gracefulShutdown('uncaughtException');
+  } catch (shutdownError) {
+    logger.error('Failed to shutdown gracefully after uncaught exception', {
+      shutdownError: shutdownError.message
+    });
+    process.exit(1);
+  }
+});
+
+// Handle beforeExit event (last chance to perform async operations)
+process.on('beforeExit', (code) => {
+  logger.info(`Process about to exit with code: ${code}`);
 });
 
 // Start the bot

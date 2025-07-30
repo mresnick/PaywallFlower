@@ -17,11 +17,19 @@ class BrowserService {
   async initBrowser() {
     if (!this.browser) {
       logger.debug('Initializing Puppeteer browser');
-      this.browser = await puppeteer.launch({
+      
+      const launchOptions = {
         headless: this.puppeteerConfig.headless,
         args: this.puppeteerConfig.args,
         timeout: this.timeout
-      });
+      };
+
+      // Set Chrome executable path if running in Docker
+      if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      }
+
+      this.browser = await puppeteer.launch(launchOptions);
     }
     return this.browser;
   }
