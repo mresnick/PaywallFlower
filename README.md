@@ -22,24 +22,6 @@ A Discord bot that automatically replies to messages containing paywalled links 
    - Uses headless browser content extraction as final fallback
 4. **Response**: Replies with archive links or extracted content
 
-## Supported Sites
-
-The bot includes built-in support for major news sites including:
-- New York Times
-- Wall Street Journal
-- Washington Post
-- Financial Times
-- The Atlantic
-- The Economist
-- Bloomberg
-- Reuters
-- The New Yorker
-- Wired
-- Medium
-- Substack
-
-The bot also uses heuristics to detect and learn new paywall sites automatically.
-
 ## Installation
 
 ### Prerequisites
