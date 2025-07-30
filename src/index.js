@@ -29,7 +29,15 @@ class PaywallFlowerBot {
     });
 
     this.client.on('messageCreate', async (message) => {
-      await this.messageHandler.handleMessage(message);
+      try {
+        await this.messageHandler.handleMessage(message);
+      } catch (error) {
+        logger.error('Error in messageCreate handler', {
+          messageId: message.id,
+          error: error.message,
+          stack: error.stack
+        });
+      }
     });
 
     this.client.on('error', (error) => {
@@ -86,6 +94,9 @@ class PaywallFlowerBot {
     }
   }
 }
+
+// Export the class for testing
+module.exports = PaywallFlowerBot;
 
 // Create and start the bot
 const bot = new PaywallFlowerBot();

@@ -16,7 +16,7 @@ class BrowserService {
    */
   async initBrowser() {
     if (!this.browser) {
-      logger.info('Initializing Puppeteer browser');
+      logger.debug('Initializing Puppeteer browser');
       this.browser = await puppeteer.launch({
         headless: this.puppeteerConfig.headless,
         args: this.puppeteerConfig.args,
@@ -31,7 +31,7 @@ class BrowserService {
    */
   async closeBrowser() {
     if (this.browser) {
-      logger.info('Closing Puppeteer browser');
+      logger.debug('Closing Puppeteer browser');
       await this.browser.close();
       this.browser = null;
       this.activeSessions = 0;
@@ -45,7 +45,7 @@ class BrowserService {
    */
   async extractContent(url) {
     if (this.activeSessions >= this.maxConcurrent) {
-      logger.warn(`Max concurrent browser sessions reached (${this.maxConcurrent}), skipping ${url}`);
+      logger.warn(`Max concurrent browser sessions reached (${this.maxConcurrent})`);
       return { success: false, error: 'Max concurrent sessions reached' };
     }
 
@@ -53,7 +53,7 @@ class BrowserService {
     let page = null;
 
     try {
-      logger.info(`Starting browser content extraction for ${url}`);
+      logger.debug(`Starting browser content extraction`);
       
       await this.initBrowser();
       page = await this.browser.newPage();
@@ -145,16 +145,14 @@ class BrowserService {
       const validationResult = this.validateExtractedContent(result.content, result.title, url);
       
       if (!validationResult.isValid) {
-        logger.warn(`Invalid content detected from ${url}: ${validationResult.reason}`, {
-          contentPreview: result.content?.substring(0, 200),
-          titleLength: result.title?.length || 0,
+        logger.debug(`Invalid content detected: ${validationResult.reason}`, {
           contentLength: result.content?.length || 0
         });
         return { success: false, error: validationResult.reason };
       }
 
       if (result.content && result.content.length > 100) {
-        logger.info(`Successfully extracted valid content from ${url}`, {
+        logger.debug(`Successfully extracted content`, {
           titleLength: result.title.length,
           contentLength: result.content.length
         });
@@ -165,14 +163,14 @@ class BrowserService {
           content: result.content
         };
       } else {
-        logger.warn(`Insufficient content extracted from ${url}`, {
+        logger.debug(`Insufficient content extracted`, {
           contentLength: result.content?.length || 0
         });
         return { success: false, error: 'Insufficient content extracted' };
       }
 
     } catch (error) {
-      logger.error(`Browser content extraction failed for ${url}`, {
+      logger.error(`Browser content extraction failed`, {
         error: error.message,
         stack: error.stack
       });

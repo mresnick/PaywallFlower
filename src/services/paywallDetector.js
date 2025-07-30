@@ -6,7 +6,20 @@ const { extractDomain } = require('../utils/urlExtractor');
 class PaywallDetectorService {
   constructor() {
     this.knownPaywallDomains = new Set(config.paywallDomains);
+    this.whitelistedDomains = new Set(config.whitelistedDomains);
     this.paywallIndicators = config.paywallIndicators;
+  }
+
+  /**
+   * Checks if a URL is from a whitelisted domain (should never be considered paywalled)
+   * @param {string} url - The URL to check
+   * @returns {boolean} True if the domain is whitelisted
+   */
+  isWhitelistedDomain(url) {
+    const domain = extractDomain(url);
+    if (!domain) return false;
+
+    return this.whitelistedDomains.has(domain);
   }
 
   /**
@@ -18,9 +31,7 @@ class PaywallDetectorService {
     const domain = extractDomain(url);
     if (!domain) return false;
 
-    const isKnown = this.knownPaywallDomains.has(domain);
-    logger.debug(`Checking known paywall domain for ${domain}`, { isKnown });
-    return isKnown;
+    return this.knownPaywallDomains.has(domain);
   }
 
   /**
@@ -30,7 +41,7 @@ class PaywallDetectorService {
    */
   async detectPaywallHeuristic(url) {
     try {
-      logger.debug(`Performing heuristic paywall detection for ${url}`);
+      logger.debug(`Performing heuristic paywall detection`);
       
       const response = await axios.get(url, {
         timeout: 5000,
@@ -49,21 +60,21 @@ class PaywallDetectorService {
       const hasPaywall = foundIndicators.length > 0;
       
       if (hasPaywall) {
-        logger.info(`Paywall detected via heuristics for ${url}`, { 
-          indicators: foundIndicators 
+        logger.debug(`Paywall detected via heuristics`, {
+          indicators: foundIndicators
         });
         
         // Add domain to known paywall domains for future reference
         const domain = extractDomain(url);
         if (domain) {
           this.knownPaywallDomains.add(domain);
-          logger.info(`Added ${domain} to known paywall domains`);
+          logger.debug(`Added ${domain} to known paywall domains`);
         }
       }
 
       return hasPaywall;
     } catch (error) {
-      logger.warn(`Failed to perform heuristic paywall detection for ${url}`, {
+      logger.debug(`Failed to perform heuristic paywall detection`, {
         error: error.message
       });
       return false;
@@ -76,12 +87,20 @@ class PaywallDetectorService {
    * @returns {Promise<boolean>} True if paywall is detected
    */
   async isPaywalled(url) {
-    // First check known domains (fast)
+    // First check if domain is whitelisted (highest priority)
+    if (this.isWhitelistedDomain(url)) {
+      logger.debug(`Domain is whitelisted, skipping paywall detection`, {
+        domain: extractDomain(url)
+      });
+      return false;
+    }
+
+    // Then check known paywall domains (fast)
     if (this.isKnownPaywallDomain(url)) {
       return true;
     }
 
-    // Then perform heuristic detection (slower)
+    // Finally perform heuristic detection (slower)
     return await this.detectPaywallHeuristic(url);
   }
 
@@ -91,7 +110,7 @@ class PaywallDetectorService {
    */
   addPaywallDomain(domain) {
     this.knownPaywallDomains.add(domain);
-    logger.info(`Manually added ${domain} to known paywall domains`);
+    logger.debug(`Manually added ${domain} to known paywall domains`);
   }
 
   /**

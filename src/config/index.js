@@ -45,6 +45,30 @@ const config = {
     'substack.com'
   ],
   
+  // Domains that should be whitelisted (never considered paywalled)
+  // These are domains that might trigger paywall indicators but don't actually have paywalls
+  whitelistedDomains: [
+    'x.com',
+    'twitter.com',
+    'facebook.com',
+    'instagram.com',
+    'linkedin.com',
+    'reddit.com',
+    'youtube.com',
+    'tiktok.com',
+    'pinterest.com',
+    'snapchat.com',
+    'discord.com',
+    'telegram.org',
+    'whatsapp.com',
+    'github.com',
+    'stackoverflow.com',
+    'wikipedia.org',
+    'archive.org',
+    'archive.today',
+    'web.archive.org'
+  ],
+  
   // Paywall detection heuristics
   paywallIndicators: [
     'subscribe',

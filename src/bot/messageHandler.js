@@ -35,8 +35,7 @@ class MessageHandler {
       logger.info(`Processing message with ${urls.length} URLs`, {
         messageId: message.id,
         channelId: message.channel.id,
-        guildId: message.guild?.id,
-        urls: urls
+        guildId: message.guild?.id
       });
 
       // Process URLs for paywall bypass
@@ -81,10 +80,8 @@ class MessageHandler {
         allowedMentions: { repliedUser: false } // Don't ping the original user
       });
 
-      logger.info('Sent bypass response', {
-        originalMessageId: originalMessage.id,
-        method: result.method,
-        originalUrl: result.originalUrl
+      logger.debug('Sent bypass response', {
+        method: result.method
       });
 
     } catch (error) {
@@ -118,7 +115,14 @@ class MessageHandler {
    * Cleanup method
    */
   async cleanup() {
-    await this.paywallBypassService.cleanup();
+    try {
+      await this.paywallBypassService.cleanup();
+    } catch (error) {
+      logger.error('Error during cleanup', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
   }
 }
 
