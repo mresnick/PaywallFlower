@@ -128,22 +128,39 @@ class PaywallBypassService {
    * @returns {string} Formatted content
    */
   formatExtractedContent(title, content, originalUrl) {
-    // Discord has a 2000 character limit for messages
-    const maxLength = 1800; // Leave room for formatting
+    // Clean and prepare content for better formatting
+    const cleanTitle = this.cleanText(title);
+    const cleanContent = this.cleanText(content);
     
-    let formattedContent = `**${title}**\n\n`;
-    
-    // Truncate content if too long
-    let articleContent = content;
-    if (articleContent.length > maxLength - formattedContent.length - 100) {
-      articleContent = articleContent.substring(0, maxLength - formattedContent.length - 100) + '...';
-    }
-    
-    formattedContent += articleContent;
+    // Format content with proper structure for parsing by messageHandler
+    let formattedContent = `**${cleanTitle}**\n\n`;
+    formattedContent += cleanContent;
     formattedContent += `\n\n*Original URL: ${originalUrl}*`;
     formattedContent += `\n*Content extracted via PaywallFlower*`;
     
     return formattedContent;
+  }
+
+  /**
+   * Cleans text content by removing excessive whitespace and formatting issues
+   * @param {string} text - Text to clean
+   * @returns {string} Cleaned text
+   */
+  cleanText(text) {
+    if (!text) return '';
+    
+    return text
+      // Remove excessive whitespace
+      .replace(/\s+/g, ' ')
+      // Remove multiple consecutive newlines
+      .replace(/\n\s*\n\s*\n/g, '\n\n')
+      // Trim whitespace
+      .trim()
+      // Remove any Discord markdown that might interfere
+      .replace(/\|\|/g, '')
+      // Clean up common formatting issues
+      .replace(/\*\*\s*\*\*/g, '')
+      .replace(/\*\s*\*/g, '');
   }
 
   /**

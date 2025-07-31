@@ -40,6 +40,18 @@ class PaywallFlowerBot {
       }
     });
 
+    this.client.on('interactionCreate', async (interaction) => {
+      try {
+        await this.messageHandler.handleInteraction(interaction);
+      } catch (error) {
+        logger.error('Error in interactionCreate handler', {
+          interactionId: interaction.id,
+          error: error.message,
+          stack: error.stack
+        });
+      }
+    });
+
     this.client.on('error', (error) => {
       this.messageHandler.handleError(error);
     });
@@ -92,12 +104,26 @@ class PaywallFlowerBot {
       
       // Cleanup message handler (includes browser service cleanup)
       if (this.messageHandler) {
-        await this.messageHandler.cleanup();
+        try {
+          await this.messageHandler.cleanup();
+        } catch (cleanupError) {
+          logger.error('Error during message handler cleanup', {
+            error: cleanupError.message,
+            stack: cleanupError.stack
+          });
+        }
       }
       
       // Destroy Discord client connection
-      if (this.client && this.client.isReady()) {
-        await this.client.destroy();
+      if (this.client && this.client.readyAt) {
+        try {
+          await this.client.destroy();
+        } catch (destroyError) {
+          logger.error('Error destroying Discord client', {
+            error: destroyError.message,
+            stack: destroyError.stack
+          });
+        }
       }
       
       // Clear the timeout since we completed successfully
@@ -109,7 +135,7 @@ class PaywallFlowerBot {
         error: error.message,
         stack: error.stack
       });
-      throw error; // Re-throw to allow calling code to handle
+      // Don't re-throw - handle gracefully
     }
   }
 }

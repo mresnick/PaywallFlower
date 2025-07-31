@@ -1,9 +1,67 @@
-const MessageHandler = require('../../src/bot/messageHandler');
+// Mock config first
+jest.mock('../../src/config', () => ({
+  whitelistedDomains: ['example.com', 'test.com'],
+  logging: {
+    level: 'info'
+  },
+  discord: {
+    token: 'mock-token'
+  },
+  paywallDomains: ['nytimes.com', 'wsj.com'],
+  paywallDetection: {
+    strongIndicators: [],
+    mediumIndicators: [],
+    weakIndicators: [],
+    negativeIndicators: [],
+    threshold: 8,
+    maxWeakIndicatorScore: 3
+  }
+}));
+
+// Mock logger
+jest.mock('../../src/utils/logger', () => ({
+  info: jest.fn(),
+  debug: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn()
+}));
+
+// Mock Discord.js components
+jest.mock('discord.js', () => ({
+  ActionRowBuilder: jest.fn().mockImplementation(() => ({
+    addComponents: jest.fn().mockReturnThis()
+  })),
+  ButtonBuilder: jest.fn().mockImplementation(() => ({
+    setCustomId: jest.fn().mockReturnThis(),
+    setLabel: jest.fn().mockReturnThis(),
+    setStyle: jest.fn().mockReturnThis(),
+    setDisabled: jest.fn().mockReturnThis()
+  })),
+  ButtonStyle: {
+    Success: 'SUCCESS',
+    Danger: 'DANGER'
+  }
+}));
+
+// Mock fs promises
+jest.mock('fs', () => ({
+  promises: {
+    mkdir: jest.fn(),
+    readFile: jest.fn(),
+    writeFile: jest.fn()
+  }
+}));
+
+// Mock puppeteer
+jest.mock('puppeteer', () => ({}));
 
 // Mock dependencies
 jest.mock('../../src/utils/urlExtractor');
 jest.mock('../../src/services/paywallBypassService');
+jest.mock('../../src/services/browserService');
+jest.mock('../../src/services/archiveService');
 
+const MessageHandler = require('../../src/bot/messageHandler');
 const { extractUrls } = require('../../src/utils/urlExtractor');
 const PaywallBypassService = require('../../src/services/paywallBypassService');
 
@@ -84,6 +142,7 @@ describe('MessageHandler', () => {
       expect(mockPaywallBypassService.processUrls).toHaveBeenCalledWith(urls);
       expect(mockMessage.reply).toHaveBeenCalledWith({
         content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
     });
@@ -149,20 +208,22 @@ describe('MessageHandler', () => {
 
       expect(mockMessage.reply).toHaveBeenCalledWith({
         content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
     });
 
-    test('should send browser response correctly', async () => {
+    test('should send browser response with condensed formatting', async () => {
       const result = {
         method: 'browser',
-        result: 'Article content extracted successfully'
+        result: '**Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*'
       };
 
       await messageHandler.sendBypassResponse(mockMessage, result);
 
       expect(mockMessage.reply).toHaveBeenCalledWith({
-        content: '🔓 **Paywall bypassed:**\nArticle content extracted successfully',
+        content: '🔓 **Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original: https://example.com*',
+        components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
     });
@@ -177,6 +238,48 @@ describe('MessageHandler', () => {
 
       // Should not throw
       await expect(messageHandler.sendBypassResponse(mockMessage, result)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('formatCondensedContent', () => {
+    test('should format content in condensed style', () => {
+      const extractedContent = '**Test Article**\n\nThis is some test content with multiple    spaces   and\n\n\nexcessive newlines.\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*';
+      
+      const result = messageHandler.formatCondensedContent(extractedContent);
+      
+      expect(result).toBe('🔓 **Test Article**\n\nThis is some test content with multiple spaces and excessive newlines.\n\n*Original: https://example.com*');
+    });
+
+    test('should truncate very long content', () => {
+      const longContent = 'Very long content. '.repeat(200); // Creates very long text
+      const extractedContent = `**Long Article**\n\n${longContent}\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*`;
+      
+      const result = messageHandler.formatCondensedContent(extractedContent);
+      
+      expect(result.length).toBeLessThan(2000); // Discord limit
+      expect(result).toContain('🔓 **Long Article**');
+      expect(result).toContain('*Original: https://example.com*');
+    });
+  });
+
+  describe('condenseText', () => {
+    test('should remove excessive whitespace', () => {
+      const text = 'This   has    multiple     spaces\n\n\n\nand newlines.';
+      const result = messageHandler.condenseText(text);
+      expect(result).toBe('This has multiple spaces and newlines.');
+    });
+
+    test('should truncate long text at sentence boundaries', () => {
+      const longText = 'First sentence. Second sentence. Third sentence. ' + 'Very long content. '.repeat(100);
+      const result = messageHandler.condenseText(longText);
+      expect(result.length).toBeLessThan(1600);
+      expect(result).toMatch(/\.$|\.\.\.$/); // Should end with period or ellipsis
+    });
+
+    test('should handle empty text', () => {
+      expect(messageHandler.condenseText('')).toBe('');
+      expect(messageHandler.condenseText(null)).toBe('');
+      expect(messageHandler.condenseText(undefined)).toBe('');
     });
   });
 
@@ -225,7 +328,7 @@ describe('MessageHandler', () => {
         {
           originalUrl: 'https://example.com/article2',
           method: 'browser',
-          result: 'Extracted content'
+          result: '**Test Article**\n\nExtracted content\n\n*Original URL: https://example.com/article2*\n*Content extracted via PaywallFlower*'
         }
       ];
 
@@ -237,10 +340,12 @@ describe('MessageHandler', () => {
       expect(mockMessage.reply).toHaveBeenCalledTimes(2);
       expect(mockMessage.reply).toHaveBeenNthCalledWith(1, {
         content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
       expect(mockMessage.reply).toHaveBeenNthCalledWith(2, {
-        content: '🔓 **Paywall bypassed:**\nExtracted content',
+        content: '🔓 **Test Article**\n\nExtracted content\n\n*Original: https://example.com/article2*',
+        components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
     });

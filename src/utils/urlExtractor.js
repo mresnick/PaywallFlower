@@ -57,8 +57,44 @@ function extractDomain(url) {
   }
 }
 
+/**
+ * Checks if a URL points to a media file based on its extension
+ * @param {string} url - The URL to check
+ * @returns {boolean} True if the URL appears to be a media file
+ */
+function isMediaFile(url) {
+  try {
+    const urlObj = new URL(url);
+    
+    // Only consider http and https protocols as valid for media files
+    if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+      return false;
+    }
+    
+    const pathname = urlObj.pathname.toLowerCase();
+    
+    // Extract file extension
+    const lastDotIndex = pathname.lastIndexOf('.');
+    if (lastDotIndex === -1 || lastDotIndex === pathname.length - 1) {
+      return false; // No extension or ends with dot
+    }
+    
+    const extension = pathname.substring(lastDotIndex + 1);
+    
+    // Remove query parameters from extension if any
+    const cleanExtension = extension.split('?')[0].split('#')[0];
+    
+    const config = require('../config');
+    return config.mediaFileExtensions.includes(cleanExtension);
+  } catch (error) {
+    logger.warn(`Failed to check if URL is media file: ${url}`, { error: error.message });
+    return false;
+  }
+}
+
 module.exports = {
   extractUrls,
   normalizeUrl,
-  extractDomain
+  extractDomain,
+  isMediaFile
 };

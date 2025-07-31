@@ -39,7 +39,8 @@ describe('PaywallFlowerBot', () => {
       login: jest.fn().mockResolvedValue(undefined),
       destroy: jest.fn().mockResolvedValue(undefined),
       user: { tag: 'TestBot#1234', id: '123456789' },
-      guilds: { cache: { size: 1 } }
+      guilds: { cache: { size: 1 } },
+      readyAt: new Date() // Add readyAt property to simulate ready state
     };
     Client.mockImplementation(() => mockClient);
   });
