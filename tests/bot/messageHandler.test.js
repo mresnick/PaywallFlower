@@ -39,7 +39,8 @@ jest.mock('discord.js', () => ({
   })),
   ButtonStyle: {
     Success: 'SUCCESS',
-    Danger: 'DANGER'
+    Danger: 'DANGER',
+    Secondary: 'SECONDARY'
   }
 }));
 
@@ -58,31 +59,41 @@ jest.mock('puppeteer', () => ({}));
 // Mock dependencies
 jest.mock('../../src/utils/urlExtractor');
 jest.mock('../../src/services/paywallBypassService');
+jest.mock('../../src/services/smartBypassService');
 jest.mock('../../src/services/browserService');
 jest.mock('../../src/services/archiveService');
 
 const MessageHandler = require('../../src/bot/messageHandler');
 const { extractUrls } = require('../../src/utils/urlExtractor');
-const PaywallBypassService = require('../../src/services/paywallBypassService');
+const SmartBypassService = require('../../src/services/smartBypassService');
 
 describe('MessageHandler', () => {
   let messageHandler;
-  let mockPaywallBypassService;
+  let mockSmartBypassService;
   let mockMessage;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset mocks
     jest.clearAllMocks();
 
-    // Mock PaywallBypassService
-    mockPaywallBypassService = {
+    // Mock SmartBypassService constructor
+    mockSmartBypassService = {
+      initialize: jest.fn().mockResolvedValue(),
       processUrls: jest.fn(),
-      cleanup: jest.fn()
+      cleanup: jest.fn(),
+      paywallDetector: {
+        whitelistedDomains: new Set()
+      }
     };
-    PaywallBypassService.mockImplementation(() => mockPaywallBypassService);
+    
+    // Mock the constructor to return our mock instance
+    SmartBypassService.mockImplementation(() => mockSmartBypassService);
 
     // Create message handler
     messageHandler = new MessageHandler();
+    
+    // Wait for initialization to complete
+    await new Promise(resolve => setTimeout(resolve, 10));
 
     // Mock Discord message object
     mockMessage = {
@@ -102,7 +113,7 @@ describe('MessageHandler', () => {
       await messageHandler.handleMessage(mockMessage);
       
       expect(extractUrls).not.toHaveBeenCalled();
-      expect(mockPaywallBypassService.processUrls).not.toHaveBeenCalled();
+      expect(mockSmartBypassService.processUrls).not.toHaveBeenCalled();
     });
 
     test('should ignore messages without content', async () => {
@@ -111,7 +122,7 @@ describe('MessageHandler', () => {
       await messageHandler.handleMessage(mockMessage);
       
       expect(extractUrls).not.toHaveBeenCalled();
-      expect(mockPaywallBypassService.processUrls).not.toHaveBeenCalled();
+      expect(mockSmartBypassService.processUrls).not.toHaveBeenCalled();
     });
 
     test('should ignore messages with no URLs', async () => {
@@ -120,7 +131,7 @@ describe('MessageHandler', () => {
       await messageHandler.handleMessage(mockMessage);
       
       expect(extractUrls).toHaveBeenCalledWith(mockMessage.content);
-      expect(mockPaywallBypassService.processUrls).not.toHaveBeenCalled();
+      expect(mockSmartBypassService.processUrls).not.toHaveBeenCalled();
     });
 
     test('should process messages with URLs', async () => {
@@ -134,14 +145,14 @@ describe('MessageHandler', () => {
       ];
 
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockResolvedValue(results);
+      mockSmartBypassService.processUrls.mockResolvedValue(results);
 
       await messageHandler.handleMessage(mockMessage);
 
       expect(extractUrls).toHaveBeenCalledWith(mockMessage.content);
-      expect(mockPaywallBypassService.processUrls).toHaveBeenCalledWith(urls);
+      expect(mockSmartBypassService.processUrls).toHaveBeenCalledWith(urls);
       expect(mockMessage.reply).toHaveBeenCalledWith({
-        content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        content: '🔓 **Archive link found (archive):**\nhttps://archive.today/abc123',
         components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
@@ -150,7 +161,7 @@ describe('MessageHandler', () => {
     test('should prevent duplicate processing of same message', async () => {
       const urls = ['https://example.com/article'];
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockResolvedValue([]);
+      mockSmartBypassService.processUrls.mockResolvedValue([]);
 
       // Process same message twice simultaneously
       const promise1 = messageHandler.handleMessage(mockMessage);
@@ -159,13 +170,13 @@ describe('MessageHandler', () => {
       await Promise.all([promise1, promise2]);
 
       // Should only be called once
-      expect(mockPaywallBypassService.processUrls).toHaveBeenCalledTimes(1);
+      expect(mockSmartBypassService.processUrls).toHaveBeenCalledTimes(1);
     });
 
     test('should handle errors gracefully', async () => {
       const urls = ['https://example.com/article'];
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockRejectedValue(new Error('Service error'));
+      mockSmartBypassService.processUrls.mockRejectedValue(new Error('Service error'));
 
       // Should not throw
       await expect(messageHandler.handleMessage(mockMessage)).resolves.toBeUndefined();
@@ -174,26 +185,26 @@ describe('MessageHandler', () => {
     test('should clean up processing set after completion', async () => {
       const urls = ['https://example.com/article'];
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockResolvedValue([]);
+      mockSmartBypassService.processUrls.mockResolvedValue([]);
 
       await messageHandler.handleMessage(mockMessage);
 
       // Should be able to process the same message again
       await messageHandler.handleMessage(mockMessage);
-      expect(mockPaywallBypassService.processUrls).toHaveBeenCalledTimes(2);
+      expect(mockSmartBypassService.processUrls).toHaveBeenCalledTimes(2);
     });
 
     test('should clean up processing set even after error', async () => {
       const urls = ['https://example.com/article'];
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockRejectedValue(new Error('Service error'));
+      mockSmartBypassService.processUrls.mockRejectedValue(new Error('Service error'));
 
       await messageHandler.handleMessage(mockMessage);
 
       // Should be able to process the same message again after error
-      mockPaywallBypassService.processUrls.mockResolvedValue([]);
+      mockSmartBypassService.processUrls.mockResolvedValue([]);
       await messageHandler.handleMessage(mockMessage);
-      expect(mockPaywallBypassService.processUrls).toHaveBeenCalledTimes(2);
+      expect(mockSmartBypassService.processUrls).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -207,7 +218,7 @@ describe('MessageHandler', () => {
       await messageHandler.sendBypassResponse(mockMessage, result);
 
       expect(mockMessage.reply).toHaveBeenCalledWith({
-        content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        content: '🔓 **Archive link found (archive):**\nhttps://archive.today/abc123',
         components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
@@ -215,14 +226,14 @@ describe('MessageHandler', () => {
 
     test('should send browser response with condensed formatting', async () => {
       const result = {
-        method: 'browser',
-        result: '**Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*'
+        method: 'browser_extraction',
+        extractedContent: '**Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*'
       };
 
       await messageHandler.sendBypassResponse(mockMessage, result);
 
       expect(mockMessage.reply).toHaveBeenCalledWith({
-        content: '🔓 **Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original: https://example.com*',
+        content: '**Test Article**\n\nThis is test content that should be condensed nicely.\n\n*Original URL: https://example.com*\n*Content extracted via PaywallFlower*',
         components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
@@ -302,14 +313,14 @@ describe('MessageHandler', () => {
   });
 
   describe('cleanup', () => {
-    test('should call paywall bypass service cleanup', async () => {
+    test('should call smart bypass service cleanup', async () => {
       await messageHandler.cleanup();
       
-      expect(mockPaywallBypassService.cleanup).toHaveBeenCalled();
+      expect(mockSmartBypassService.cleanup).toHaveBeenCalled();
     });
 
     test('should handle cleanup errors gracefully', async () => {
-      mockPaywallBypassService.cleanup.mockRejectedValue(new Error('Cleanup error'));
+      mockSmartBypassService.cleanup.mockRejectedValue(new Error('Cleanup error'));
       
       // Should not throw
       await expect(messageHandler.cleanup()).resolves.toBeUndefined();
@@ -327,24 +338,24 @@ describe('MessageHandler', () => {
         },
         {
           originalUrl: 'https://example.com/article2',
-          method: 'browser',
-          result: '**Test Article**\n\nExtracted content\n\n*Original URL: https://example.com/article2*\n*Content extracted via PaywallFlower*'
+          method: 'browser_extraction',
+          extractedContent: '**Test Article**\n\nExtracted content\n\n*Original URL: https://example.com/article2*\n*Content extracted via PaywallFlower*'
         }
       ];
 
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockResolvedValue(results);
+      mockSmartBypassService.processUrls.mockResolvedValue(results);
 
       await messageHandler.handleMessage(mockMessage);
 
       expect(mockMessage.reply).toHaveBeenCalledTimes(2);
       expect(mockMessage.reply).toHaveBeenNthCalledWith(1, {
-        content: '🔓 **Archive link found:**\nhttps://archive.today/abc123',
+        content: '🔓 **Archive link found (archive):**\nhttps://archive.today/abc123',
         components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
       expect(mockMessage.reply).toHaveBeenNthCalledWith(2, {
-        content: '🔓 **Test Article**\n\nExtracted content\n\n*Original: https://example.com/article2*',
+        content: '**Test Article**\n\nExtracted content\n\n*Original URL: https://example.com/article2*\n*Content extracted via PaywallFlower*',
         components: expect.any(Array),
         allowedMentions: { repliedUser: false }
       });
@@ -353,7 +364,7 @@ describe('MessageHandler', () => {
     test('should handle empty results array', async () => {
       const urls = ['https://example.com/article'];
       extractUrls.mockReturnValue(urls);
-      mockPaywallBypassService.processUrls.mockResolvedValue([]);
+      mockSmartBypassService.processUrls.mockResolvedValue([]);
 
       await messageHandler.handleMessage(mockMessage);
 

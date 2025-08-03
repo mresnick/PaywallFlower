@@ -61,7 +61,8 @@ jest.mock('discord.js', () => ({
   })),
   ButtonStyle: {
     Success: 'SUCCESS',
-    Danger: 'DANGER'
+    Danger: 'DANGER',
+    Secondary: 'SECONDARY'
   }
 }));
 
@@ -104,7 +105,7 @@ describe('Feedback System Tests', () => {
     // Mock interaction object
     mockInteraction = {
       id: 'test-interaction-id',
-      customId: 'paywalled_no_123456789_abcdef123',
+      customId: 'not_paywalled_123456789_abcdef123',
       isButton: jest.fn().mockReturnValue(true),
       user: { id: 'test-user-id' },
       reply: jest.fn().mockResolvedValue(),
@@ -171,7 +172,7 @@ describe('Feedback System Tests', () => {
     });
 
     test('should handle expired feedback sessions', async () => {
-      mockInteraction.customId = 'paywalled_no_expired_session';
+      mockInteraction.customId = 'not_paywalled_expired_session';
 
       await messageHandler.handleInteraction(mockInteraction);
 
@@ -194,19 +195,30 @@ describe('Feedback System Tests', () => {
       messageHandler.disableFeedbackButtons = jest.fn().mockResolvedValue();
     });
 
-    test('should handle "was paywalled" feedback', async () => {
-      mockInteraction.customId = 'paywalled_yes_123456789_abcdef123';
+    test('should handle "bypass failed" feedback and blacklist method', async () => {
+      const feedbackId = '123456789_abcdef123';
+      messageHandler.feedbackData.set(feedbackId, {
+        originalUrl: 'https://nytimes.com/article/test',
+        method: 'outline_com',
+        timestamp: Date.now()
+      });
+      
+      mockInteraction.customId = 'bypass_failed_123456789_abcdef123';
+      
+      // Mock the blacklistMethodForDomain method
+      messageHandler.blacklistMethodForDomain = jest.fn().mockResolvedValue();
 
       await messageHandler.handleFeedbackInteraction(mockInteraction);
 
+      expect(messageHandler.blacklistMethodForDomain).toHaveBeenCalledWith('https://nytimes.com/article/test', 'outline_com');
       expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: '✅ Thank you for confirming! This helps improve our paywall detection.',
+        content: '📝 Thank you for reporting! We\'ve blacklisted this method for this site and will try other approaches.',
         ephemeral: true
       });
     });
 
     test('should handle "not paywalled" feedback and add to whitelist', async () => {
-      mockInteraction.customId = 'paywalled_no_123456789_abcdef123';
+      mockInteraction.customId = 'not_paywalled_123456789_abcdef123';
       
       // Mock the addToWhitelist method
       messageHandler.addToWhitelist = jest.fn().mockResolvedValue();
@@ -224,7 +236,7 @@ describe('Feedback System Tests', () => {
 
     test('should clean up feedback data after processing', async () => {
       const feedbackId = '123456789_abcdef123';
-      mockInteraction.customId = `paywalled_yes_${feedbackId}`;
+      mockInteraction.customId = `bypass_failed_${feedbackId}`;
 
       expect(messageHandler.feedbackData.has(feedbackId)).toBe(true);
 
@@ -285,7 +297,7 @@ describe('Feedback System Tests', () => {
       await messageHandler.saveWhitelistUpdate(domain);
 
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining('user_whitelist.json'),
+        expect.stringContaining('user-whitelist.json'),
         JSON.stringify([domain], null, 2)
       );
     });
@@ -302,7 +314,7 @@ describe('Feedback System Tests', () => {
       await messageHandler.saveWhitelistUpdate(domain);
 
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining('user_whitelist.json'),
+        expect.stringContaining('user-whitelist.json'),
         JSON.stringify([...existingWhitelist, domain], null, 2)
       );
     });
@@ -387,6 +399,120 @@ describe('Feedback System Tests', () => {
       expect(messageHandler.feedbackData.size).toBe(1);
       expect(messageHandler.feedbackData.has('recent_feedback')).toBe(true);
       expect(messageHandler.feedbackData.has('old_feedback')).toBe(false);
+    });
+  });
+
+  describe('blacklistMethodForDomain', () => {
+    beforeEach(() => {
+      // Mock SmartBypassService with domain strategies
+      messageHandler.paywallBypassService = {
+        domainStrategies: new Map(),
+        paywallDetector: {
+          whitelistedDomains: new Set()
+        }
+      };
+      messageHandler.isSmartService = true;
+    });
+
+    test('should blacklist method for domain', async () => {
+      const url = 'https://example.com/article';
+      const methodName = 'outline_com';
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      const strategy = messageHandler.paywallBypassService.domainStrategies.get('example.com');
+      expect(strategy).toBeDefined();
+      expect(strategy.blacklistedMethods).toContain(methodName);
+      expect(strategy.domain).toBe('example.com');
+    });
+
+    test('should create new strategy if none exists', async () => {
+      const url = 'https://newsite.com/article';
+      const methodName = '12ft_io';
+
+      expect(messageHandler.paywallBypassService.domainStrategies.has('newsite.com')).toBe(false);
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      const strategy = messageHandler.paywallBypassService.domainStrategies.get('newsite.com');
+      expect(strategy).toBeDefined();
+      expect(strategy.blacklistedMethods).toContain(methodName);
+      expect(strategy.preferredMethods).toEqual([]);
+    });
+
+    test('should remove method from preferred methods when blacklisting', async () => {
+      const url = 'https://example.com/article';
+      const methodName = 'wayback_machine';
+
+      // Set up existing strategy with method in preferred list
+      const existingStrategy = {
+        domain: 'example.com',
+        preferredMethods: ['wayback_machine', 'outline_com'],
+        blacklistedMethods: [],
+        lastUpdated: new Date(),
+        totalAttempts: 5,
+        successfulAttempts: 3
+      };
+      messageHandler.paywallBypassService.domainStrategies.set('example.com', existingStrategy);
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      const strategy = messageHandler.paywallBypassService.domainStrategies.get('example.com');
+      expect(strategy.blacklistedMethods).toContain(methodName);
+      expect(strategy.preferredMethods).not.toContain(methodName);
+      expect(strategy.preferredMethods).toContain('outline_com');
+    });
+
+    test('should not duplicate methods in blacklist', async () => {
+      const url = 'https://example.com/article';
+      const methodName = 'google_cache';
+
+      // Set up existing strategy with method already blacklisted
+      const existingStrategy = {
+        domain: 'example.com',
+        preferredMethods: [],
+        blacklistedMethods: ['google_cache'],
+        lastUpdated: new Date(),
+        totalAttempts: 2,
+        successfulAttempts: 0
+      };
+      messageHandler.paywallBypassService.domainStrategies.set('example.com', existingStrategy);
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      const strategy = messageHandler.paywallBypassService.domainStrategies.get('example.com');
+      expect(strategy.blacklistedMethods.filter(m => m === methodName)).toHaveLength(1);
+    });
+
+    test('should handle invalid URLs gracefully', async () => {
+      const invalidUrl = 'not-a-valid-url';
+      const methodName = 'outline_com';
+
+      await messageHandler.blacklistMethodForDomain(invalidUrl, methodName);
+
+      // Should not create any strategies for invalid URLs
+      expect(messageHandler.paywallBypassService.domainStrategies.size).toBe(0);
+    });
+
+    test('should handle legacy service gracefully', async () => {
+      messageHandler.isSmartService = false;
+      const url = 'https://example.com/article';
+      const methodName = 'outline_com';
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      // Should not create any strategies for legacy service
+      expect(messageHandler.paywallBypassService.domainStrategies.size).toBe(0);
+    });
+
+    test('should handle missing method name gracefully', async () => {
+      const url = 'https://example.com/article';
+      const methodName = null;
+
+      await messageHandler.blacklistMethodForDomain(url, methodName);
+
+      // Should not create any strategies for missing method name
+      expect(messageHandler.paywallBypassService.domainStrategies.size).toBe(0);
     });
   });
 });

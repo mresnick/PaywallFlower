@@ -1,0 +1,152 @@
+{
+  "globalSettings": {
+    "maxConcurrentRequests": 5,
+    "defaultTimeout": 30000,
+    "retryAttempts": 2,
+    "healthCheckInterval": 300000,
+    "rateLimit": {
+      "maxRequestsPerUrlPerMinute": 3,
+      "maxRequestsPerMinute": 10
+    }
+  },
+  "methods": {
+    "archive_today": {
+      "enabled": true,
+      "priority": 9,
+      "timeout": 10000,
+      "testUrl": "https://www.example.com",
+      "description": "Archive.today/Archive.ph service - fast and reliable for recent content",
+      "healthCheckUrl": "https://archive.today/newest/https://www.example.com"
+    },
+    "12ft_io": {
+      "enabled": true,
+      "priority": 8,
+      "timeout": 15000,
+      "testUrl": "https://www.nytimes.com/2024/01/01/technology/test-article.html",
+      "description": "12ft.io paywall bypass service - works well for many news sites",
+      "notes": "May be blocked by some sites, check for error messages"
+    },
+    "outline_com": {
+      "enabled": true,
+      "priority": 7,
+      "timeout": 20000,
+      "testUrl": "https://www.washingtonpost.com/technology/test-article",
+      "description": "Outline.com article extraction - provides clean reading experience",
+      "notes": "Good for content extraction and formatting"
+    },
+    "google_cache": {
+      "enabled": true,
+      "priority": 6,
+      "timeout": 15000,
+      "testUrl": "https://www.example.com",
+      "description": "Google Cache - uses cached versions of pages",
+      "notes": "May not have recent content, but often bypasses paywalls"
+    },
+    "wayback_machine": {
+      "enabled": true,
+      "priority": 4,
+      "timeout": 15000,
+      "testUrl": "https://www.example.com",
+      "description": "Internet Archive Wayback Machine - historical snapshots",
+      "notes": "Known reliability issues with some domains, especially news sites",
+      "healthCheckUrl": "https://archive.org/wayback/available?url=https://www.wikipedia.org"
+    },
+    "browser_extraction": {
+      "enabled": true,
+      "priority": 3,
+      "timeout": 30000,
+      "testUrl": "https://www.example.com",
+      "description": "Headless browser content extraction - last resort method",
+      "notes": "Resource intensive, use when other methods fail",
+      "maxConcurrent": 2
+    }
+  },
+  "domainOverrides": {
+    "nytimes.com": {
+      "preferredMethods": ["12ft_io", "outline_com", "browser_extraction"],
+      "blacklistedMethods": ["wayback_machine"],
+      "notes": "Wayback Machine often fails for NYT, 12ft.io usually works"
+    },
+    "wsj.com": {
+      "preferredMethods": ["archive_today", "12ft_io", "google_cache"],
+      "blacklistedMethods": ["wayback_machine"],
+      "notes": "WSJ blocks many services, archive.today often works"
+    },
+    "washingtonpost.com": {
+      "preferredMethods": ["outline_com", "12ft_io", "archive_today"],
+      "blacklistedMethods": [],
+      "notes": "Outline.com works well for WaPo articles"
+    },
+    "ft.com": {
+      "preferredMethods": ["archive_today", "google_cache", "browser_extraction"],
+      "blacklistedMethods": ["wayback_machine"],
+      "notes": "Financial Times has strong paywall, archive.today most reliable"
+    },
+    "economist.com": {
+      "preferredMethods": ["12ft_io", "archive_today", "outline_com"],
+      "blacklistedMethods": ["wayback_machine"],
+      "notes": "The Economist blocks many services"
+    },
+    "bloomberg.com": {
+      "preferredMethods": ["archive_today", "google_cache", "browser_extraction"],
+      "blacklistedMethods": ["wayback_machine", "outline_com"],
+      "notes": "Bloomberg has sophisticated blocking, limited options work"
+    },
+    "medium.com": {
+      "preferredMethods": ["outline_com", "12ft_io", "archive_today"],
+      "blacklistedMethods": [],
+      "notes": "Medium articles work well with most services"
+    },
+    "substack.com": {
+      "preferredMethods": ["archive_today", "outline_com", "12ft_io"],
+      "blacklistedMethods": [],
+      "notes": "Substack newsletters, archive.today usually reliable"
+    }
+  },
+  "fallbackStrategies": {
+    "default": {
+      "description": "Default fallback strategy for unknown domains",
+      "strategy": "priority_order",
+      "maxAttempts": 4,
+      "skipUnhealthyMethods": true
+    },
+    "news_sites": {
+      "description": "Strategy for major news websites",
+      "domains": ["nytimes.com", "wsj.com", "washingtonpost.com", "ft.com"],
+      "strategy": "domain_optimized",
+      "maxAttempts": 3,
+      "skipUnhealthyMethods": true,
+      "parallelAttempts": false
+    },
+    "social_media": {
+      "description": "Strategy for social media and blog platforms",
+      "domains": ["medium.com", "substack.com"],
+      "strategy": "fast_first",
+      "maxAttempts": 3,
+      "skipUnhealthyMethods": true,
+      "parallelAttempts": true
+    }
+  },
+  "healthCheck": {
+    "enabled": true,
+    "interval": 300000,
+    "timeout": 10000,
+    "retries": 2,
+    "unhealthyThreshold": 3,
+    "recoveryThreshold": 2
+  },
+  "metrics": {
+    "enabled": true,
+    "retentionDays": 30,
+    "aggregationInterval": 3600000,
+    "exportEnabled": false,
+    "exportPath": "./data/metrics/"
+  },
+  "logging": {
+    "logAttempts": true,
+    "logSuccesses": true,
+    "logFailures": true,
+    "logHealthChecks": false,
+    "logMetrics": false
+  }
+}

@@ -1,4 +1,5 @@
 const { extractUrls } = require('../utils/urlExtractor');
+const SmartBypassService = require('../services/smartBypassService');
 const PaywallBypassService = require('../services/paywallBypassService');
 const logger = require('../utils/logger');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -7,15 +8,50 @@ const fs = require('fs').promises;
 const path = require('path');
 
 class MessageHandler {
-  constructor() {
-    this.paywallBypassService = new PaywallBypassService();
+  constructor(options = {}) {
+    // Use SmartBypassService by default, fallback to legacy service if specified
+    if (options.useLegacyService) {
+      this.paywallBypassService = new PaywallBypassService();
+      this.isSmartService = false;
+    } else {
+      this.paywallBypassService = new SmartBypassService();
+      this.isSmartService = true;
+    }
+    
     this.processingMessages = new Set(); // Prevent duplicate processing
     this.feedbackData = new Map(); // Store feedback data for button interactions
+    this.initialized = false;
     
-    // Load user whitelist on startup
-    this.loadUserWhitelist().catch(error => {
-      logger.error('Failed to load user whitelist on startup', { error: error.message });
+    // Initialize the service
+    this.initialize().catch(error => {
+      logger.error('Failed to initialize MessageHandler', { error: error.message });
     });
+  }
+
+  /**
+   * Initializes the message handler and its services
+   */
+  async initialize() {
+    if (this.initialized) return;
+
+    try {
+      // Initialize the bypass service if it's the smart service
+      if (this.isSmartService) {
+        await this.paywallBypassService.initialize();
+      }
+
+      // Load user whitelist
+      await this.loadUserWhitelist();
+      
+      this.initialized = true;
+      logger.info('MessageHandler initialized successfully', {
+        serviceType: this.isSmartService ? 'SmartBypassService' : 'PaywallBypassService'
+      });
+      
+    } catch (error) {
+      logger.error('Failed to initialize MessageHandler', { error: error.message });
+      throw error;
+    }
   }
 
   /**
@@ -76,12 +112,29 @@ class MessageHandler {
     try {
       let responseContent;
 
-      if (result.method === 'archive') {
-        // For archive links, send a simple response
-        responseContent = `🔓 **Archive link found:**\n${result.result}`;
-      } else if (result.method === 'browser') {
-        // For extracted content, use condensed formatting
-        responseContent = this.formatCondensedContent(result.result);
+      // Handle different response formats based on service type
+      if (this.isSmartService) {
+        // SmartBypassService response format
+        if (result.method && (result.method.includes('archive') || result.method === 'archive_today' || result.method === 'wayback_machine')) {
+          // For archive links, send a simple response
+          responseContent = `🔓 **Archive link found (${result.method}):**\n${result.result}`;
+        } else if (result.extractedContent) {
+          // For extracted content, use the pre-formatted content
+          responseContent = result.extractedContent;
+        } else if (result.method && (result.method === '12ft_io' || result.method === 'outline_com' || result.method === 'google_cache')) {
+          // For bypass service links
+          responseContent = `🔓 **Bypass link found (${result.method}):**\n${result.result}`;
+        } else {
+          // Fallback formatting
+          responseContent = `🔓 **Content bypassed via ${result.method}:**\n${result.result}`;
+        }
+      } else {
+        // Legacy PaywallBypassService response format
+        if (result.method === 'archive') {
+          responseContent = `🔓 **Archive link found:**\n${result.result}`;
+        } else if (result.method === 'browser') {
+          responseContent = this.formatCondensedContent(result.result);
+        }
       }
 
       // Create feedback buttons
@@ -92,7 +145,8 @@ class MessageHandler {
       this.feedbackData.set(feedbackId, {
         originalUrl: result.originalUrl,
         method: result.method,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        serviceType: this.isSmartService ? 'smart' : 'legacy'
       });
 
       // Send the response with buttons
@@ -104,7 +158,8 @@ class MessageHandler {
 
       logger.debug('Sent bypass response with feedback buttons', {
         method: result.method,
-        feedbackId: feedbackId
+        feedbackId: feedbackId,
+        serviceType: this.isSmartService ? 'smart' : 'legacy'
       });
 
     } catch (error) {
@@ -126,13 +181,13 @@ class MessageHandler {
     const row = new ActionRowBuilder()
       .addComponents(
         new ButtonBuilder()
-          .setCustomId(`paywalled_yes_${feedbackId}`)
-          .setLabel('✅ Was Paywalled')
-          .setStyle(ButtonStyle.Success),
+          .setCustomId(`bypass_failed_${feedbackId}`)
+          .setLabel('🚫 Bypass Failed')
+          .setStyle(ButtonStyle.Danger),
         new ButtonBuilder()
-          .setCustomId(`paywalled_no_${feedbackId}`)
+          .setCustomId(`not_paywalled_${feedbackId}`)
           .setLabel('❌ Not Paywalled')
-          .setStyle(ButtonStyle.Danger)
+          .setStyle(ButtonStyle.Secondary)
       );
 
     // Store the URL for this feedback ID
@@ -280,7 +335,7 @@ class MessageHandler {
       const customId = interaction.customId;
       
       // Parse feedback button interactions
-      if (customId.startsWith('paywalled_')) {
+      if (customId.startsWith('bypass_failed_') || customId.startsWith('not_paywalled_')) {
         await this.handleFeedbackInteraction(interaction);
       }
 
@@ -328,15 +383,24 @@ class MessageHandler {
     }
 
     const { originalUrl } = feedbackData;
-    const wasPaywalled = response === 'yes';
+    const bypassFailed = action === 'bypass' && response === 'failed';
+    const notPaywalled = action === 'not' && response === 'paywalled';
 
-    if (wasPaywalled) {
-      // User confirmed it was paywalled - no action needed
+    if (bypassFailed) {
+      // User reported bypass failed - blacklist method for this domain
+      await this.blacklistMethodForDomain(originalUrl, feedbackData.method);
+      
       await interaction.reply({
-        content: '✅ Thank you for confirming! This helps improve our paywall detection.',
+        content: '📝 Thank you for reporting! We\'ve blacklisted this method for this site and will try other approaches.',
         ephemeral: true
       });
-    } else {
+      
+      logger.info('Bypass failure reported and method blacklisted', {
+        url: originalUrl,
+        userId: interaction.user.id,
+        method: feedbackData.method || 'unknown'
+      });
+    } else if (notPaywalled) {
       // User said it wasn't paywalled - add to whitelist
       await this.addToWhitelist(originalUrl);
       
@@ -357,7 +421,8 @@ class MessageHandler {
 
     logger.info('Processed feedback', {
       url: originalUrl,
-      wasPaywalled: wasPaywalled,
+      bypassFailed: bypassFailed,
+      notPaywalled: notPaywalled,
       userId: interaction.user.id
     });
   }
@@ -402,7 +467,7 @@ class MessageHandler {
    */
   async saveWhitelistUpdate(domain) {
     try {
-      const whitelistFile = path.join(__dirname, '../../data/user_whitelist.json');
+      const whitelistFile = path.join(__dirname, '../../data/user-whitelist.json');
       
       // Ensure data directory exists
       const dataDir = path.dirname(whitelistFile);
@@ -483,14 +548,14 @@ class MessageHandler {
       const disabledRow = new ActionRowBuilder()
         .addComponents(
           new ButtonBuilder()
-            .setCustomId('disabled_yes')
-            .setLabel('✅ Was Paywalled')
-            .setStyle(ButtonStyle.Success)
+            .setCustomId('disabled_bypass_failed')
+            .setLabel('🚫 Bypass Failed')
+            .setStyle(ButtonStyle.Danger)
             .setDisabled(true),
           new ButtonBuilder()
-            .setCustomId('disabled_no')
+            .setCustomId('disabled_not_paywalled')
             .setLabel('❌ Not Paywalled')
-            .setStyle(ButtonStyle.Danger)
+            .setStyle(ButtonStyle.Secondary)
             .setDisabled(true)
         );
 
@@ -512,7 +577,7 @@ class MessageHandler {
    */
   async loadUserWhitelist() {
     try {
-      const whitelistFile = path.join(__dirname, '../../data/user_whitelist.json');
+      const whitelistFile = path.join(__dirname, '../../data/user-whitelist.json');
       
       try {
         const data = await fs.readFile(whitelistFile, 'utf8');
@@ -523,12 +588,17 @@ class MessageHandler {
           if (!config.whitelistedDomains.includes(domain)) {
             config.whitelistedDomains.push(domain);
           }
-          this.paywallBypassService.paywallDetector.whitelistedDomains.add(domain);
+          
+          // Add to the appropriate service's paywall detector
+          if (this.paywallBypassService && this.paywallBypassService.paywallDetector) {
+            this.paywallBypassService.paywallDetector.whitelistedDomains.add(domain);
+          }
         }
         
         logger.info('Loaded user whitelist', {
           count: userWhitelist.length,
-          domains: userWhitelist
+          domains: userWhitelist,
+          serviceType: this.isSmartService ? 'smart' : 'legacy'
         });
         
       } catch (readError) {
@@ -561,6 +631,72 @@ class MessageHandler {
       
     } catch (error) {
       logger.error('Error during cleanup', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
+  }
+
+  /**
+   * Blacklists a specific method for a domain when user reports bypass failure
+   * @param {string} url - The original URL
+   * @param {string} methodName - The method that failed
+   */
+  async blacklistMethodForDomain(url, methodName) {
+    try {
+      if (!this.isSmartService || !methodName) {
+        logger.warn('Cannot blacklist method: not using smart service or no method specified', {
+          isSmartService: this.isSmartService,
+          methodName
+        });
+        return;
+      }
+
+      const { extractDomain } = require('../utils/urlExtractor');
+      const domain = extractDomain(url);
+      
+      if (!domain) {
+        logger.warn('Could not extract domain from URL for method blacklisting', { url });
+        return;
+      }
+
+      // Get or create domain strategy
+      let strategy = this.paywallBypassService.domainStrategies.get(domain);
+      
+      if (!strategy) {
+        strategy = {
+          domain,
+          preferredMethods: [],
+          blacklistedMethods: [],
+          lastUpdated: new Date(),
+          totalAttempts: 0,
+          successfulAttempts: 0
+        };
+        this.paywallBypassService.domainStrategies.set(domain, strategy);
+      }
+
+      // Add method to blacklist if not already there
+      if (!strategy.blacklistedMethods.includes(methodName)) {
+        strategy.blacklistedMethods.push(methodName);
+        strategy.lastUpdated = new Date();
+        
+        // Remove from preferred methods if it was there
+        const preferredIndex = strategy.preferredMethods.indexOf(methodName);
+        if (preferredIndex > -1) {
+          strategy.preferredMethods.splice(preferredIndex, 1);
+        }
+        
+        logger.info('Method blacklisted for domain based on user feedback', {
+          domain,
+          method: methodName,
+          blacklistedMethods: strategy.blacklistedMethods
+        });
+      }
+
+    } catch (error) {
+      logger.error('Error blacklisting method for domain', {
+        url,
+        methodName,
         error: error.message,
         stack: error.stack
       });

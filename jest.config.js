@@ -28,5 +28,8 @@ module.exports = {
   clearMocks: true,
   
   // Verbose output
-  verbose: true
+  verbose: true,
+  
+  // Set environment variables for tests
+  setupFiles: ['<rootDir>/tests/jest.setup.js']
 };
